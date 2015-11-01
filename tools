@@ -1,0 +1,564 @@
+#ifndef _TOOLS_H
+#define _TOOLS_H
+
+#include <cstdio>
+#include <unistd.h>
+
+#include <vector>
+using std::vector;
+
+#include <cstring>
+#include <string>
+using std::string;
+
+#include <iostream>
+using std::cout;
+using std::endl;
+
+#if __cplusplus >= 201103L
+#include <memory>
+#include <unordered_map>
+using std::unordered_map;
+#include <unordered_set>
+using std::unordered_set;
+#endif
+
+#include <fstream>
+using std::ifstream;
+
+#include <set>
+using std::set;
+#include <map>
+using std::map;
+
+//#define debug
+#ifdef debug
+#define debug_printf printf
+#else
+#define debug_printf(...)
+#endif
+
+#define handle_invalid(fmt,...)  do{printf(fmt,##__VA_ARGS__);exit(-1);}while(0)
+
+#if __cplusplus >= 201103L
+
+class File
+{
+public:
+    static long file_size (FILE *fp)
+    {
+        unsigned long sz=0;
+        if (fp)
+        {
+            ::fseek(fp, 0, SEEK_END);
+            sz = ::ftell(fp);
+            ::rewind(fp);
+        }
+        return sz;
+    }
+    void file_size (void)
+    {
+        unsigned long sz=0;
+        FILE *fp=ptr.get();
+        if (fp)
+        {
+            ::fseek(fp, 0, SEEK_END);
+            sz = ::ftell(fp);
+            ::rewind(fp);
+        }
+        f_size=sz;
+    }
+
+private:
+    static const long SIZE_READ_WRITE=1024*1024;
+
+private:
+    std::shared_ptr<FILE> ptr;
+    string f_name;
+    long f_size=0;
+
+public:
+    File()
+    {
+    }
+    explicit File (const char * file_name,const char *mode="rb"):
+        ptr(::fopen(file_name,mode),::fclose),f_name(file_name)
+    {
+        if(!ptr)
+        {
+            handle_invalid("\n err. cannot open \e[1;31m%s\e[0m\n",file_name);
+        }
+
+        if (strncmp("r",mode,1)==0)
+        {
+            f_size=file_size(ptr.get());
+        }
+        debug_printf("%s's size is %d\n",f_name,f_size);
+    }
+
+    explicit File (string file_name,const char *mode="rb"):File(file_name.c_str(),mode) {}
+    File(const File &file) = delete;
+    File & operator = (const File &) = delete;
+
+    void fopen (const char * file_name,const char *mode="rb")
+    {
+        ptr= {::fopen(file_name,mode),::fclose};
+        f_name=file_name;
+        f_size=file_size(ptr.get());
+        if(!ptr)
+        {
+            handle_invalid("\n err. cannot open \e[1;31m%s\e[0m\n",file_name);
+        }
+        debug_printf("%s's size is %d\n",f_name,f_size);
+    }
+
+    FILE * get (void)
+    {
+        return ptr.get();
+    }
+
+    long size (void)
+    {
+        return f_size;
+    }
+
+    long ftell (void)
+    {
+        ::ftell(get());
+    }
+
+    void fseek (long pos)
+    {
+        ::fseek(get(),pos,SEEK_SET);
+    }
+
+    void set_size (long new_size)
+    {
+        unsigned char c=0;
+        long curr=ftell();
+        fseek(new_size-1);
+        fwrite(&c,1);
+        fseek(curr);
+    }
+
+    long fread_check (long start, long size)
+    {
+        if (start+size>f_size)
+        {
+            printf("wanna read large size %ld (%ld + %ld)! only can read %ld.\n",size+start,start,size,f_size);
+            size=f_size-start;
+        }
+        return size;
+    }
+
+    //read file data to buffer
+    void fread (unsigned char *buffer, long size)
+    {
+        size=fread_check(ftell(),size);
+        size_t ret=::fread(buffer, sizeof(char),size,get());
+        if ((long)ret!=size)
+        {
+            handle_invalid("read %s fail. need read %ld, only read %ld\n",f_name.c_str(),size,ret);
+        }
+    }
+    void fread (unsigned char *buffer, long start, long size)
+    {
+        size=fread_check(start,size);
+        fseek(start);
+        fread(buffer,size);
+    }
+    void fread (unsigned char *buffer)
+    {
+        fread(buffer,f_size);
+    }
+    void fread (vector<unsigned char>& buffer, long size)
+    {
+        fread(buffer.data(),size);
+    }
+    void fread (vector<unsigned char>& buffer)
+    {
+        fread(buffer.data(),buffer.capacity());
+    }
+
+    //read file data to new file
+    void fread (const char* file_name, long start, long size)
+    {
+        size=fread_check(start,size);
+        fseek(start);
+
+        vector<unsigned char> vec;
+        vec.reserve(SIZE_READ_WRITE);
+
+        long read_size;
+        File file(file_name,"wb");
+        while(size)
+        {
+            read_size=(size>SIZE_READ_WRITE)?(SIZE_READ_WRITE):(size);
+            fread(vec,read_size);
+            file.fwrite(vec,read_size);
+
+            size-=read_size;
+        }
+    }
+
+    void fread (const char* file_name)
+    {
+        fread(file_name,0,f_size);
+    }
+
+
+    //write data to file from buffer
+    void fwrite (unsigned char *buffer, long size)
+    {
+        size_t ret=::fwrite(buffer, sizeof(char),size,get());
+        if ((long)ret!=size)
+        {
+            //char str [name.size()+50];
+            //sprintf (str, "write %s fail! need write %d, but only write %d.",name.c_str(),(int)size,(int)ret);
+            //perror(str);
+            handle_invalid("write %s fail. need read %ld, only read %ld\n",f_name.c_str(),size,ret);
+        }
+    }
+    void fwrite (unsigned char *buffer, long start, long size)
+    {
+        fseek(start);
+        fwrite(buffer,size);
+    }
+    void fwrite (vector<unsigned char>& buffer, long start, long size)
+    {
+        fwrite(buffer.data(),start,size);
+    }
+    void fwrite (vector<unsigned char>& buffer, long size)
+    {
+        fwrite(buffer.data(),size);
+    }
+    void fwrite (vector<unsigned char>& buffer)
+    {
+        fread(buffer.data(),buffer.capacity());
+    }
+
+    //write data to file from param file
+    void fwrite (const string& file_name, long start_write,long start_read, long size)
+    {
+        File file(file_name);
+        size=file.fread_check(start_read,size);
+
+        vector<unsigned char> vec;
+        vec.reserve(SIZE_READ_WRITE);
+
+        file.fseek(start_read);
+        fseek(start_write);
+
+        long read_size;
+        while(size)
+        {
+            read_size=(size>SIZE_READ_WRITE)?(SIZE_READ_WRITE):(size);
+            file.fread(vec,read_size);
+            fwrite(vec,read_size);
+
+            size-=read_size;
+        }
+
+        return;
+    }
+    void fwrite (const string& file_name, long start, long size)
+    {
+        fwrite(file_name,ftell(),start,size);
+    }
+    void fwrite (const string& file_name)
+    {
+        long file_size;
+        {
+            File f(file_name);
+            file_size=f.size();
+        }
+        fwrite(file_name,0,file_size);
+        return ;
+    }
+};
+
+class String
+{
+private:
+    char* str_buffer=nullptr;//must initialize!
+    int str_size=0;
+
+public:
+    //default constructor
+    String() {}
+    //param constructor
+    String(const char* str)
+    {
+        if (str!=NULL)
+        {
+            int len=strlen(str);
+            str_buffer=new char [len+1];
+            strcpy(str_buffer,str);
+            str_buffer[len]='\0';
+            str_size=len;
+        }
+    }
+
+    //copy constructor
+    String(const String& str):str_buffer(new char [str.size()+1]),str_size(str.size())
+    {
+        strcpy(str_buffer,str.c_str());
+        str_buffer[str.size()]=0;
+    }
+
+#if 1
+    //move copy constructor, NO need ?
+    String(String&& rhs) noexcept :str_buffer(rhs.str_buffer),str_size(rhs.str_size)
+    {
+        rhs.str_buffer=nullptr;
+        rhs.str_size=0;
+    }
+#endif
+
+    //move assign
+    String& operator= (String&& rhs)
+    {
+        delete[] str_buffer;
+
+        str_buffer=rhs.str_buffer;
+        str_size=rhs.str_size;
+
+        rhs.str_buffer=nullptr;
+        rhs.str_size=0;
+        return *this;
+    }
+    //copy assign
+    String& operator= (const String& rhs)
+    {
+        if (this!=&rhs)
+        {
+            String tmp(rhs);
+            swap(tmp);
+        }
+        return *this;
+    }
+
+    //no need. for inline bool operator== (const String& lhs,const String& rhs)
+#if 0
+    bool operator== (const String& rhs) const
+    {
+        if (this==&rhs)
+        {
+            return true;
+        }
+        return compare(rhs)==0;
+    }
+#endif
+
+#if 0
+    String(std::initializer_list<String> list)
+    {
+    }
+#endif
+
+    ~String()
+    {
+        delete[] str_buffer;
+    }
+
+    int size (void) const
+    {
+        return str_size;
+    }
+    const char * c_str(void) const
+    {
+        return str_buffer;
+    }
+
+    char operator[] (int pos)
+    {
+        return str_buffer[pos];
+    }
+    char operator[] (int pos) const
+    {
+        return str_buffer[pos];
+    }
+
+    const char* operator() (void)
+    {
+        return str_buffer;//using this func, you can std::string str;printf("%s", str());
+    }
+
+    int compare (const String& rhs) const
+    {
+        //const int len = std::min(str_size, rhs.str_size);
+        return strcmp(str_buffer,rhs.str_buffer);
+    }
+    inline bool operator< (String& rhs)
+    {
+        return compare(rhs)<0;
+    }
+
+#if 1
+    String& operator+= (const String& str)
+    {
+        int size=str_size+str.str_size;
+
+        char * new_addr=new char[size+1];
+        strcpy(new_addr,str_buffer);
+        strcpy(new_addr+str_size,str.str_buffer);
+        new_addr[size]=0;
+
+        delete[] str_buffer;
+        str_buffer=new_addr;
+        str_size=size;
+    }
+#endif
+
+    String& swap (String &str)
+    {
+        std::swap(str_buffer,str.str_buffer);
+        std::swap(str_size,str.str_size);
+    }
+};
+
+namespace std
+{
+//template<typename _Tp> struct hash;
+
+// for unordered_map
+template<>
+struct hash<String>
+{
+    size_t operator() (const String& str) const noexcept
+    {
+        size_t hash=0;
+        for (int i = 0; i < str.size(); i++)
+        {
+            hash = 31 * hash + str[i];
+        }
+        return hash;
+        //return std::_Hash_impl::hash(str.data(), str.size());
+    }
+};
+}
+
+inline bool operator!= (const String& lhs,const String& rhs)
+{
+    //return !(lhs==rhs); //cannot compile, why ?
+
+    if (&lhs==&rhs)
+    {
+        return false;
+    }
+    return !(lhs.compare(rhs)==0);
+}
+
+// for unordered_map
+inline bool operator== (const String& lhs, const String& rhs)
+{
+    if (&lhs==&rhs)
+    {
+        return true;
+    }
+    return lhs.compare(rhs)==0;
+}
+
+//for map
+inline bool operator< (const String& lhs,const String& rhs)
+{
+    return lhs.compare(rhs)<0;
+}
+
+std::ostream& operator<< (std::ostream& out,const String& str)
+{
+    return std::__ostream_insert(out, str.c_str(), str.size());
+}
+
+#endif /* __cplusplus >= 201103L */
+
+#if 1
+#include <sys/time.h>
+class Time
+{
+private:
+    struct timeval tv1,tv2;
+
+public:
+    void start (void)
+    {
+        gettimeofday(&tv1,NULL);
+    }
+
+    void end (const char* str=NULL, int print=1)
+    {
+        gettimeofday(&tv2,NULL);
+        if (str && print)
+        {
+            ms(str);
+        }
+    }
+    long ms (const char* str)
+    {
+        long millisecond=(tv2.tv_sec- tv1.tv_sec)*1000+ (tv2.tv_usec- tv1.tv_usec)/1000;
+        printf("%s cost %ldms\n",str,millisecond);
+        return millisecond;
+    }
+
+    long ms (void)
+    {
+        long millisecond=(tv2.tv_sec- tv1.tv_sec)*1000+ (tv2.tv_usec- tv1.tv_usec)/1000;
+        printf("time cost %ldms\n",millisecond);
+        return millisecond;
+    }
+
+    long us (void)
+    {
+        long microsecond=(tv2.tv_sec- tv1.tv_sec)*1000000+ (tv2.tv_usec- tv1.tv_usec);
+        printf("time cost %ldus\n",microsecond);
+        return microsecond;
+    }
+
+};
+#else
+
+#if __cplusplus >= 201103L
+#include <chrono>
+using namespace std::chrono;
+class Time
+{
+private:
+    decltype(system_clock::now()) t1,t2;
+public:
+    void start (void)
+    {
+        t1=system_clock::now();
+    }
+
+    void end (const char* str=nullptr, int print=1)
+    {
+        t2=system_clock::now();
+        if (str && print)
+        {
+            ms();
+        }
+    }
+    void ms (const char* str)
+    {
+        auto time=duration_cast<milliseconds>(t2-t1);
+        printf("%s cost %ldms\n",str,time);
+    }
+
+    void ms (void)
+    {
+        auto time=duration_cast<milliseconds>(t2-t1);
+        printf("time cost %ldms\n",time);
+    }
+
+    void us (void)
+    {
+        auto time=duration_cast<microseconds>(t2-t1);
+        printf("time cost %ldus\n",time);
+    }
+}
+#endif /* __cplusplus >= 201103L */
+
+#endif
+
+#endif /* _TOOLS_H */
+
