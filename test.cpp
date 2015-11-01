@@ -171,17 +171,9 @@ public:
 
 String operator+ (const String& lhs, const String& rhs)
 {
-#if 0
-    String str_;
-    str_.data()=new char[lhs.size()+rhs.size()+1];
-    strcpy(str_.c_str(),lhs.c_str());
-    strcpy(str_.c_str()+lhs.size(),rhs.c_str());
-    return str_;
-#else
     String str_(lhs);
     str_.append(rhs);
     return str_;
-#endif
 }
 
 inline bool operator!= (const String& lhs,const String& rhs)
